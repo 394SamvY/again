@@ -1,41 +1,41 @@
+# LiteLLM Proxy 配置文件
+# 用于统一管理多个 LLM 模型的 API 调用
+
+
 model_list:
-  # Claude Sonnet 4.5 - 支持多种模型名请求
-  - model_name: claude-sonnet-4-20250514
-    litellm_params:
-      model: anthropic/claude-sonnet-4-20250514
-      api_base: os.environ/ANTHROPIC_BASE_URL
-      api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: claude-sonnet-4-5-20250929
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
-      api_base: os.environ/ANTHROPIC_BASE_URL
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  - model_name: claude-4-5-sonnet
+  - model_name: claude-opus-4-5-20251101
     litellm_params:
-      model: anthropic/claude-sonnet-4-5-20250929
-      api_base: os.environ/ANTHROPIC_BASE_URL
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-  # Claude Haiku
-  - model_name: claude-3-5-haiku-20241022
-    litellm_params:
-      model: anthropic/claude-3-5-haiku-20241022
-      api_base: os.environ/ANTHROPIC_BASE_URL
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-  - model_name: claude-haiku-3-5
-    litellm_params:
-      model: anthropic/claude-3-5-haiku-20241022
-      api_base: os.environ/ANTHROPIC_BASE_URL
+      model: anthropic/claude-opus-4-5-20251101
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: claude-haiku-4-5-20251001
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
-      api_base: os.environ/ANTHROPIC_BASE_URL
       api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gemini-3-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro-preview-05-06
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: deepseek-chat
+    litellm_params:
+      model: openai/deepseek-chat
+      api_base: https://api.deepseek.com/v1
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+
+  # - model_name: your-custom-model
+  #   litellm_params:
+  #     model: anthropic/your-model-id
+  #     api_base: https://your-api-endpoint.com
+  #     api_key: os.environ/YOUR_API_KEY
 
 litellm_settings:
   set_verbose: False

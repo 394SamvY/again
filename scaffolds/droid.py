@@ -1,73 +1,107 @@
 """
-Droid 脚手架实现（预留）
+Droid 脚手架实现
 
-Droid 是一个代码开发助手工具。
-此模块预留了 Droid 的接口实现，待后续补充具体逻辑。
 """
 
+import json
+import os
 from typing import Dict, List, Optional
 
-from .base import BaseScaffold
+from .base import BaseScaffold, SUPPORTED_MODELS, DEFAULT_MODEL
 
 
 class DroidScaffold(BaseScaffold):
     """
-    Droid 脚手架（预留）
-    
-    TODO: 根据 Droid 的实际接口补充实现
-    
-    预期特点：
-    - 配置文件位置：待确认
-    - 环境变量：待确认
-    - 命令格式：待确认
+    Droid 脚手架
     """
     
     name = "droid"
     
-    def get_docker_env(self, proxy_url: str) -> Dict[str, str]:
+    def get_docker_env(self, proxy_url: str, model: Optional[str] = None) -> Dict[str, str]:
         """
         返回 Droid 需要的 Docker 环境变量
         
-        TODO: 根据 Droid 的实际需求补充
         """
-        # 预留：假设 Droid 使用这些环境变量
         return {
-            "DROID_API_URL": proxy_url,
-            "DROID_API_KEY": "fake-key",
+            "FACTORY_API_KEY": os.environ.get("FACTORY_API_KEY", ""),
+            "HOME": "/tmp",  # 设置 HOME 目录，确保非 root 用户有写权限
         }
     
-    def get_setup_script(self, proxy_url: str) -> str:
+    def get_setup_script(self, proxy_url: str, model: Optional[str] = None) -> str:
         """
         返回 Droid 的初始化脚本
         
-        TODO: 根据 Droid 的配置方式补充
         """
-        # 预留：可能需要创建配置文件
-        return "echo 'Droid setup placeholder'"
+        # 构建所有模型的配置
+        custom_models = []
+        for i, model_name in enumerate(SUPPORTED_MODELS):
+            model_config = {
+                "model": model_name,
+                "id": model_name,  # 直接使用模型名称作为 id
+                "index": i,
+                "baseUrl": proxy_url,
+                "apiKey": "fake-key",
+                "displayName": model_name,
+                "noImageSupport": False,
+                "provider": "anthropic",
+            }
+            custom_models.append(model_config)
+        
+        settings = {
+            "customModels": custom_models
+        }
+        
+        settings_json = json.dumps(settings, ensure_ascii=False)
+        
+        setup_script = f'''
+curl -fsSL https://app.factory.ai/cli | sh && \
+export PATH="$HOME/.local/bin:$PATH" && \
+mkdir -p ~/.factory && \
+echo '{settings_json}' > ~/.factory/settings.json
+'''.strip()
+        
+        return setup_script
     
     def build_commands(
         self, 
         queries: List[str], 
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None
     ) -> List[str]:
         """
-        构建 Droid 命令序列
+        构建 Droid CLI 命令序列
         
-        TODO: 根据 Droid 的 CLI 接口补充
+        Args:
+            queries: 用户查询列表
+            model: 可选的模型名称，如 "claude-sonnet-4-5-20250929"
+        
+        Returns:
+            命令字符串列表
         """
         commands = []
         
-        for i, query in enumerate(queries):
-            # 转义查询
-            escaped_query = query.replace('"', '\\"')
+        # 使用指定模型或默认模型
+        model_name = model or DEFAULT_MODEL
+        
+        for query in queries:
+            # 转义查询中的特殊字符
+            escaped_query = self._escape_for_shell(query)
             
-            # 预留：假设命令格式
-            if i == 0:
-                cmd = f'droid "{escaped_query}"'
-            else:
-                cmd = f'droid --continue "{escaped_query}"'
-            
+            # 构建 droid exec 命令
+            cmd = f'droid exec --skip-permissions-unsafe -m "{model_name}" "{escaped_query}"'
             commands.append(cmd)
         
         return commands
+    
+    @staticmethod
+    def _escape_for_shell(text: str) -> str:
+        """
+        转义文本中的特殊字符，使其可以安全地用在 shell 命令中
+        """
+        # 转义双引号和反斜杠
+        text = text.replace('\\', '\\\\')
+        text = text.replace('"', '\\"')
+        text = text.replace('$', '\\$')
+        text = text.replace('`', '\\`')
+        return text
 

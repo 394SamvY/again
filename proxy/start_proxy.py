@@ -6,10 +6,9 @@
     cd ./benchmark/proxy
     python start_proxy.py
     
-架构说明：
 - Proxy 在宿主机运行，监听 4000 端口
 - 通过 /tmp/current_instance_id.txt 获取当前 case 的 instance_id
-- 轨迹保存到 ./trajectories/{instance_id}.jsonl
+- 轨迹保存到 ./results/trajectories/{instance_id}.jsonl
 """
 
 import os

@@ -16,9 +16,17 @@ env/
 .venv/
 .env
 
+# 敏感配置文件（包含 API Keys）
+proxy/env.sh
+
 # 运行产物
 # results/
 # trajectories/
+/ignored/
+/docs
+/test/
+/results/
+/huggingface/
 *.log
 dedup.log
 

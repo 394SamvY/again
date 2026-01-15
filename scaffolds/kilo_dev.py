@@ -1,73 +1,145 @@
 """
-Kilo-Dev 脚手架实现（预留）
+Kilo Code 脚手架实现
 
-Kilo-Dev 是一个代码开发助手工具。
-此模块预留了 Kilo-Dev 的接口实现，待后续补充具体逻辑。
 """
 
+import json
 from typing import Dict, List, Optional
 
-from .base import BaseScaffold
+from .base import BaseScaffold, DEFAULT_MODEL
 
 
 class KiloDevScaffold(BaseScaffold):
     """
-    Kilo-Dev 脚手架（预留）
-    
-    TODO: 根据 Kilo-Dev 的实际接口补充实现
-    
-    预期特点：
-    - 配置文件位置：待确认
-    - 环境变量：待确认
-    - 命令格式：待确认
+    Kilo Code 脚手架
     """
     
     name = "kilo-dev"
     
-    def get_docker_env(self, proxy_url: str) -> Dict[str, str]:
+    AUTO_APPROVAL_CONFIG = {
+        "enabled": True,
+        "read": {"enabled": True, "outside": True},
+        "write": {"enabled": True, "outside": True, "protected": True},
+        "browser": {"enabled": True},
+        "retry": {"enabled": True, "delay": 10},
+        "mcp": {"enabled": True},
+        "mode": {"enabled": True},
+        "subtasks": {"enabled": True},
+        "execute": {
+            "enabled": True,
+            "allowed": [],  # 空列表表示允许所有命令
+            "denied": []
+        },
+        "question": {"enabled": True, "timeout": 60},
+        "todo": {"enabled": True}
+    }
+    
+    def get_docker_env(self, proxy_url: str, model: Optional[str] = None) -> Dict[str, str]:
         """
-        返回 Kilo-Dev 需要的 Docker 环境变量
-        
-        TODO: 根据 Kilo-Dev 的实际需求补充
+        返回 Kilo Code 需要的 Docker 环境变量
         """
-        # 预留：假设 Kilo-Dev 使用这些环境变量
         return {
-            "LLM_BASE_URL": proxy_url,
-            "LLM_API_KEY": "fake-key",
+            "HOME": "/tmp",  # 设置 HOME 目录，确保非 root 用户有写权限
+            "CI": "true",  # 禁用交互式界面
+            "TERM": "dumb",  # 禁用高级终端功能
+            "NO_COLOR": "1",  # 禁用颜色输出
         }
     
-    def get_setup_script(self, proxy_url: str) -> str:
+    def get_setup_script(self, proxy_url: str, model: Optional[str] = None) -> str:
         """
-        返回 Kilo-Dev 的初始化脚本
+        返回 Kilo Code 的初始化脚本
         
-        TODO: 根据 Kilo-Dev 的配置方式补充
+        Args:
+            proxy_url: LiteLLM Proxy 的 URL
+            model: 可选的模型名称，如 "claude-sonnet-4-5-20250929"
         """
-        # 预留：可能需要创建配置文件
-        return "echo 'Kilo-Dev setup placeholder'"
+        # 使用指定模型或默认模型
+        model_name = model or DEFAULT_MODEL
+        
+        # 构建配置文件内容
+        config = {
+            "version": "1.0.0",
+            "mode": "code",
+            "telemetry": False,
+            "provider": "default",
+            "providers": [
+                {
+                    "id": "default",
+                    "provider": "openai",
+                    "openAiApiKey": "fake-api-key-for-proxy",  # Proxy 会使用自己的 key（至少10字符）
+                    "openAiBaseUrl": f"{proxy_url}/v1",  # 需要 /v1 后缀
+                    "openAiModelId": model_name  # 使用指定的模型
+                }
+            ],
+            "autoApproval": self.AUTO_APPROVAL_CONFIG,
+            "theme": "dark",
+            "customThemes": {}
+        }
+        
+        config_json = json.dumps(config, ensure_ascii=False)
+      
+        setup_script = f'''
+mkdir -p $HOME/.npm-global && \
+npm config set prefix $HOME/.npm-global && \
+npm install -g @kilocode/cli && \
+export PATH="$HOME/.npm-global/bin:$PATH" && \
+mkdir -p $HOME/.kilocode/cli && \
+echo '{config_json}' > $HOME/.kilocode/cli/config.json
+'''.strip()
+        
+        return setup_script
     
     def build_commands(
         self, 
         queries: List[str], 
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None
     ) -> List[str]:
         """
-        构建 Kilo-Dev 命令序列
+        构建 Kilo Code CLI 命令序列
         
-        TODO: 根据 Kilo-Dev 的 CLI 接口补充
+        参数说明：
+        - --auto: 自动模式，非交互式运行
+        - --yolo: 自动批准所有工具权限（等同于 autoApproval.enabled=true）
+        - --append-system-prompt: 追加自定义系统提示词
+                
+        Args:
+            queries: 用户查询列表
+            system_prompt: 可选的系统提示词
+            model: 可选的模型名称，如 "claude-sonnet-4-5-20250929"
+        
+        Returns:
+            命令字符串列表
         """
         commands = []
         
         for i, query in enumerate(queries):
-            # 转义查询
-            escaped_query = query.replace('"', '\\"')
+            # 转义查询中的特殊字符
+            escaped_query = self._escape_for_shell(query)
             
-            # 预留：假设命令格式
-            if i == 0:
-                cmd = f'kilo "{escaped_query}"'
-            else:
-                cmd = f'kilo --continue "{escaped_query}"'
+            # 构建基础命令
+            # --auto: 自动模式（非交互式）
+            # --yolo: 自动批准所有权限
+            # --json: JSON 输出模式，完全禁用 TUI（适合 Docker 环境）
+            cmd = f'kilocode --auto --yolo --json "{escaped_query}"'
+            
+            # 只在第一个查询时添加 system prompt
+            if i == 0 and system_prompt:
+                escaped_sp = self._escape_for_shell(system_prompt)
+                cmd += f' --append-system-prompt "{escaped_sp}"'
             
             commands.append(cmd)
         
         return commands
-
+    
+    @staticmethod
+    def _escape_for_shell(text: str) -> str:
+        """
+        转义文本中的特殊字符，使其可以安全地用在 shell 命令中
+        """
+        # 转义双引号和反斜杠
+        text = text.replace('\\', '\\\\')
+        text = text.replace('"', '\\"')
+        text = text.replace('$', '\\$')
+        text = text.replace('`', '\\`')
+        return text

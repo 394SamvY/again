@@ -11,24 +11,39 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
 
+# 支持的模型列表（与 litellm_config.yaml 中的 model_name 对应）
+SUPPORTED_MODELS = [
+    # Anthropic Claude
+    "claude-sonnet-4-5-20250929",
+    "claude-opus-4-5-20251101",
+    "claude-haiku-4-5-20251001",
+    # Google Gemini
+    "gemini-3-pro",
+    # DeepSeek
+    "deepseek-chat",
+]
+
+# 默认模型
+DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+
+
 class BaseScaffold(ABC):
     """
     脚手架抽象基类
     
-    每个脚手架（如 claudecode, kilo-dev, droid）都需要继承此类并实现所有抽象方法。
-    Runner 通过这些统一接口与不同脚手架交互，实现解耦。
     """
     
     # 脚手架名称，用于匹配 case["scaffold"]["name"]
     name: str = ""
     
     @abstractmethod
-    def get_docker_env(self, proxy_url: str) -> Dict[str, str]:
+    def get_docker_env(self, proxy_url: str, model: Optional[str] = None) -> Dict[str, str]:
         """
         返回 Docker 容器需要的环境变量
         
         Args:
             proxy_url: LiteLLM Proxy 的 URL，如 "http://host.docker.internal:4000"
+            model: 可选的模型名称，用于某些需要在环境变量中指定模型的脚手架
         
         Returns:
             环境变量字典，如 {"ANTHROPIC_BASE_URL": "...", "ANTHROPIC_API_KEY": "..."}
@@ -40,7 +55,7 @@ class BaseScaffold(ABC):
         pass
     
     @abstractmethod
-    def get_setup_script(self, proxy_url: str) -> str:
+    def get_setup_script(self, proxy_url: str, model: Optional[str] = None) -> str:
         """
         返回容器启动时的初始化脚本
         
@@ -48,6 +63,7 @@ class BaseScaffold(ABC):
         
         Args:
             proxy_url: LiteLLM Proxy 的 URL
+            model: 可选的模型名称，用于配置文件中指定模型
         
         Returns:
             Shell 脚本字符串，如 "mkdir -p ~/.claude && echo '...' > ~/.claude/settings.json"
@@ -62,7 +78,8 @@ class BaseScaffold(ABC):
     def build_commands(
         self, 
         queries: List[str], 
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None
     ) -> List[str]:
         """
         根据用户查询列表构建任务命令序列
@@ -70,6 +87,7 @@ class BaseScaffold(ABC):
         Args:
             queries: 用户查询列表，如 ["第一个问题", "追问"]
             system_prompt: 可选的系统提示词
+            model: 可选的模型名称，用于命令行参数中指定模型
         
         Returns:
             命令列表，如 ["claude -p '问题1'", "claude -c -p '问题2'"]

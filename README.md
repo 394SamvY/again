@@ -1,6 +1,6 @@
 # again
 
-一个用于评估 AI Agent 指令遵循能力的基准测试框架。通过 LiteLLM Proxy 拦截 API 调用，收集完整的交互轨迹，并使用 LLM 进行自动化评分。
+一个用于评估 AI Coding Agent 指令遵循能力的基准测试框架。通过 LiteLLM Proxy 拦截 API 调用，收集完整的交互轨迹，并使用 LLM 进行自动化评分。
 
 ## 🌟 特性
 
@@ -38,15 +38,35 @@ pip install ray
 pip install openai
 ```
 
+### 配置 API Keys
+
+```bash
+cd proxy
+cp env.sh.example env.sh
+# 编辑 env.sh，填入你的 API Keys
+source env.sh
+```
+
 ### 运行示例
 
 ```bash
 # 1. 启动 Proxy（新终端窗口）
 cd proxy
+source env.sh  # 加载 API Keys
 python start_proxy.py
 
 # 2. 运行 Benchmark（另一个终端窗口）
-python benchmark_runner.py --data data_checklist.jsonl
+# 默认从 HuggingFace 加载 MiniMaxAI/OctoCodingBench 数据集
+python benchmark_runner.py
+
+# 使用本地文件调试
+python benchmark_runner.py --dataset test/data_debug.jsonl
+
+# 指定模型运行
+python benchmark_runner.py --model claude-opus-4-5-20251101
+
+# 查看支持的模型列表
+python benchmark_runner.py --list-models
 
 # 3. 轨迹处理：去重合并原始轨迹
 python convert/convert_cc_traj_to_msg.py \
@@ -56,7 +76,7 @@ python convert/convert_cc_traj_to_msg.py \
 # 4. 评估结果
 python evaluate.py \
     --trajectories ./results/merged_trajectories.jsonl \
-    --data data_checklist.jsonl \
+    --dataset MiniMaxAI/OctoCodingBench \
     --output ./results/scores.json
 ```
 
@@ -91,13 +111,14 @@ benchmark/
 
 ### 运行 Benchmark
 
-`benchmark_runner.py` 负责调度测试用例并在 Docker 容器中执行任务。支持多种脚手架。
+`benchmark_runner.py` 负责调度测试用例并在 Docker 容器中执行任务。支持多种脚手架和模型。
 
 ```bash
 python benchmark_runner.py \
-    --data data_checklist.jsonl \  # 测试用例文件
-    --timeout 3600 \               # 单任务超时（秒）
-    --case instance_id             # 可选：只运行指定用例
+    --dataset MiniMaxAI/OctoCodingBench \  # HuggingFace 数据集或本地 JSONL 文件
+    --model claude-sonnet-4-5-20250929 \   # 指定模型（可选）
+    --timeout 3600 \                       # 单任务超时（秒）
+    --case instance_id                     # 可选：只运行指定用例
 ```
 
 **工作流程：**
@@ -119,8 +140,8 @@ python benchmark_runner.py \
 | 脚手架名称 | 工具 | 状态 |
 |-----------|------|------|
 | `claudecode` | Claude Code (Anthropic) | ✅ 已实现 |
-| `kilo-dev` | Kilo-Dev | 🚧 预留 |
-| `droid` | Droid | 🚧 预留 |
+| `kilo-dev` | Kilo Code | ✅ 已实现 |
+| `droid` | Droid (Factory AI) | ✅ 已实现 |
 
 **添加新脚手架：**
 
@@ -143,8 +164,7 @@ python convert/convert_cc_traj_to_msg.py \
 1. **读取分桶**：按 session_id 将原始记录分配到不同的桶中
 2. **时间排序**：对每个 session 内的记录按请求时间排序
 3. **去重合并**：移除重复的上下文前缀，保留最完整的轨迹
-4. **Generation 标记**：标记哪些 assistant 输出是真实生成的（用于训练数据区分）
-5. **格式转换**：将 Anthropic 格式转换为统一的 messages 格式
+4. **格式转换**：将 Anthropic 格式转换为统一的 messages 格式
 
 **功能特性：**
 
@@ -328,11 +348,24 @@ Proxy 收集的原始轨迹，每个 API 调用一条记录：
 
 ```yaml
 model_list:
+  # Anthropic Claude
   - model_name: claude-sonnet-4-5-20250929
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
-      api_base: https://api.anthropic.com
       api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Google Gemini
+  - model_name: gemini-3-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro-preview-05-06
+      api_key: os.environ/GEMINI_API_KEY
+
+  # DeepSeek（需要指定 api_base）
+  - model_name: deepseek-chat
+    litellm_params:
+      model: openai/deepseek-chat
+      api_base: https://api.deepseek.com/v1
+      api_key: os.environ/DEEPSEEK_API_KEY
 ```
 
 ### 环境变量
@@ -366,4 +399,3 @@ docker run -d \
 ## 📝 License
 
 MIT License
-

@@ -19,7 +19,7 @@
 
 from typing import Type
 
-from .base import BaseScaffold
+from .base import BaseScaffold, SUPPORTED_MODELS, DEFAULT_MODEL
 from .claudecode import ClaudeCodeScaffold
 from .kilo_dev import KiloDevScaffold
 from .droid import DroidScaffold
@@ -77,6 +77,8 @@ __all__ = [
     "ClaudeCodeScaffold",
     "KiloDevScaffold",
     "DroidScaffold",
+    "SUPPORTED_MODELS",
+    "DEFAULT_MODEL",
     "get_scaffold",
     "list_scaffolds",
 ]

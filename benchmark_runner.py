@@ -8,16 +8,26 @@ Benchmark Runner - 在 Docker 中运行测试用例并收集轨迹
 - 通过共享文件 /tmp/current_instance_id.txt 传递当前 case 的 instance_id
 - 串行执行，每个 case 对应一个轨迹文件
 - 支持多种脚手架：claudecode, kilo-dev, droid 等
+- 支持指定模型，每次用一个模型完整运行所有 case
 
 用法:
     # 1. 先启动 Proxy（在另一个终端）
     cd benchmark/proxy && python start_proxy.py
 
-    # 2. 运行 benchmark
-    python benchmark_runner.py --data data_checklist.jsonl
+    # 2. 运行 benchmark（默认从 HuggingFace 加载 MiniMaxAI/OctoCodingBench）
+    python benchmark_runner.py
     
-    # 运行单个 case
-    python benchmark_runner.py --data data_checklist.jsonl --case benchmark-md-emoji-test-001
+    # 3. 使用本地文件调试
+    python benchmark_runner.py --dataset test/data_debug.jsonl
+    
+    # 4. 指定模型运行
+    python benchmark_runner.py --model MiniMax-M2.1
+    
+    # 5. 运行单个 case
+    python benchmark_runner.py --case benchmark-md-emoji-test-001
+    
+    # 6. 查看支持的模型列表
+    python benchmark_runner.py --list-models
 """
 
 import argparse
@@ -26,7 +36,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from scaffolds import get_scaffold
+from scaffolds import get_scaffold, SUPPORTED_MODELS, DEFAULT_MODEL
 
 
 # 固定路径配置
@@ -57,12 +67,17 @@ def cleanup_container(container_name):
     run_command(["docker", "rm", "-f", container_name], check=False, capture_output=True)
 
 
-def run_task(case, timeout=3600):
+def run_task(case, timeout=3600, model=None):
     """
     运行任务容器
     
     根据 case 中的 scaffold 配置选择对应的脚手架实现，
     由脚手架负责构建环境变量、初始化脚本和任务命令。
+    
+    Args:
+        case: 测试用例数据
+        timeout: 超时时间（秒）
+        model: 指定使用的模型名称，如 "MiniMax-M2.1"
     """
     instance_id = case["instance_id"]
     image = case["image"]
@@ -84,9 +99,9 @@ def run_task(case, timeout=3600):
     container_name = f"task-{instance_id}"
     cleanup_container(container_name)
     
-    # 由脚手架构建初始化脚本和任务命令
-    setup_script = scaffold.get_setup_script(PROXY_URL)
-    task_commands = scaffold.build_commands(user_queries, system_prompt)
+    # 由脚手架构建初始化脚本和任务命令（传递 model 参数）
+    setup_script = scaffold.get_setup_script(PROXY_URL, model=model)
+    task_commands = scaffold.build_commands(user_queries, system_prompt, model=model)
     
     # 组合完整命令
     all_commands = [setup_script] + task_commands
@@ -99,8 +114,12 @@ def run_task(case, timeout=3600):
         "--add-host=host.docker.internal:host-gateway",
     ]
     
+    # 以非 root 用户运行，避免 Claude Code 的安全限制
+    # (--dangerously-skip-permissions 不能在 root 权限下使用)
+    cmd.extend(["--user", "1000:1000"])
+    
     # 添加脚手架指定的环境变量
-    env_vars = scaffold.get_docker_env(PROXY_URL)
+    env_vars = scaffold.get_docker_env(PROXY_URL, model=model)
     for key, value in env_vars.items():
         cmd.extend(["-e", f"{key}={value}"])
     
@@ -113,6 +132,7 @@ def run_task(case, timeout=3600):
     # 打印任务信息
     print(f"[TASK] 启动任务容器: {instance_id}")
     print(f"[TASK] 脚手架: {scaffold_name}")
+    print(f"[TASK] 模型: {model or DEFAULT_MODEL}")
     print(f"[TASK] 镜像: {image}")
     print(f"[TASK] 工作目录: {workspace}")
     print(f"[TASK] 环境变量: {env_vars}")
@@ -135,7 +155,7 @@ def run_task(case, timeout=3600):
         cleanup_container(container_name)
 
 
-def run_single_case(case, trajectories_dir, timeout=3600):
+def run_single_case(case, trajectories_dir, timeout=3600, model=None):
     """运行单个测试用例"""
     instance_id = case["instance_id"]
     print(f"\n{'='*60}")
@@ -144,7 +164,7 @@ def run_single_case(case, trajectories_dir, timeout=3600):
     
     set_current_instance_id(instance_id)
     
-    success = run_task(case, timeout)
+    success = run_task(case, timeout, model=model)
     
     trajectory_file = os.path.join(trajectories_dir, f"{instance_id}.jsonl")
     if os.path.exists(trajectory_file):
@@ -167,13 +187,74 @@ def check_proxy_running():
         return False
 
 
+def load_cases(dataset_path, split="train"):
+    """
+    智能加载数据集：自动判断本地文件或 HuggingFace 数据集
+    
+    Args:
+        dataset_path: 本地 JSONL 文件路径 或 HuggingFace 数据集名称
+        split: HuggingFace 数据集分片，默认 "train"
+    
+    Returns:
+        测试用例列表
+    """
+    # 判断是否为本地文件（文件存在 或 以 .jsonl 结尾）
+    is_local = os.path.exists(dataset_path) or dataset_path.endswith('.jsonl')
+    
+    if is_local:
+        if not os.path.exists(dataset_path):
+            print(f"[ERROR] 本地文件不存在: {dataset_path}")
+            return None
+        print(f"[RUNNER] 从本地文件加载: {dataset_path}")
+        with open(dataset_path) as f:
+            cases = [json.loads(line) for line in f if line.strip()]
+        print(f"[RUNNER] 加载完成，共 {len(cases)} 个测试用例")
+        return cases
+    else:
+        try:
+            from datasets import load_dataset
+        except ImportError:
+            print("[ERROR] 请先安装 datasets: pip install datasets")
+            return None
+        
+        print(f"[RUNNER] 从 HuggingFace 加载数据集: {dataset_path}")
+        dataset = load_dataset(dataset_path, split=split)
+        
+        # 转换为字典列表
+        cases = [dict(item) for item in dataset]
+        print(f"[RUNNER] 加载完成，共 {len(cases)} 个测试用例")
+        
+        return cases
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark Runner - 多脚手架支持")
-    parser.add_argument("--data", required=True, help="测试用例文件 (JSONL)")
+    # 默认数据集
+    DEFAULT_DATASET = "MiniMaxAI/OctoCodingBench"
+    
+    parser = argparse.ArgumentParser(description="Benchmark Runner - 多脚手架、多模型支持")
+    parser.add_argument("--dataset", default=DEFAULT_DATASET, 
+                        help=f"数据集：本地 JSONL 文件路径 或 HuggingFace 数据集名称 (默认: {DEFAULT_DATASET})")
     parser.add_argument("--timeout", type=int, default=3600, help="单个任务超时时间(秒)")
     parser.add_argument("--case", help="只运行指定 instance_id 的用例")
+    parser.add_argument("--model", help=f"指定使用的模型 (默认: {DEFAULT_MODEL})")
+    parser.add_argument("--list-models", action="store_true", help="列出所有支持的模型")
     parser.add_argument("--skip-proxy-check", action="store_true", help="跳过 Proxy 检查")
     args = parser.parse_args()
+    
+    # 列出支持的模型
+    if args.list_models:
+        print("支持的模型列表:")
+        for i, model in enumerate(SUPPORTED_MODELS):
+            default_mark = " (默认)" if model == DEFAULT_MODEL else ""
+            print(f"  {i+1}. {model}{default_mark}")
+        return
+    
+    # 验证模型名称
+    model = args.model
+    if model and model not in SUPPORTED_MODELS:
+        print(f"[ERROR] 不支持的模型: {model}")
+        print(f"[ERROR] 支持的模型: {', '.join(SUPPORTED_MODELS)}")
+        return
     
     if not args.skip_proxy_check and not check_proxy_running():
         print(f"[ERROR] LiteLLM Proxy 未运行！")
@@ -184,10 +265,11 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     TRAJECTORIES_DIR.mkdir(parents=True, exist_ok=True)
     
-    with open(args.data) as f:
-        cases = [json.loads(line) for line in f if line.strip()]
-    
-    print(f"[RUNNER] 加载了 {len(cases)} 个测试用例")
+    # 加载测试用例（自动判断本地文件或 HuggingFace）
+    cases = load_cases(args.dataset)
+    if cases is None:
+        return
+    print(f"[RUNNER] 使用模型: {model or DEFAULT_MODEL}")
     print(f"[RUNNER] 输出目录: {OUTPUT_DIR}")
     print(f"[RUNNER] 轨迹目录: {TRAJECTORIES_DIR}")
     print(f"[RUNNER] Proxy 地址: http://localhost:{PROXY_PORT}")
@@ -208,10 +290,11 @@ def main():
     results = []
     for i, case in enumerate(cases):
         print(f"\n[PROGRESS] {i+1}/{len(cases)}")
-        success = run_single_case(case, str(TRAJECTORIES_DIR), args.timeout)
+        success = run_single_case(case, str(TRAJECTORIES_DIR), args.timeout, model=model)
         results.append({
             "instance_id": case["instance_id"],
             "scaffold": case.get("scaffold", {}).get("name", "claudecode"),
+            "model": model or DEFAULT_MODEL,
             "success": success
         })
     
@@ -224,6 +307,7 @@ def main():
     success_count = sum(1 for r in results if r["success"])
     print(f"\n{'='*60}")
     print(f"[DONE] 运行完成")
+    print(f"[DONE] 模型: {model or DEFAULT_MODEL}")
     print(f"[DONE] 成功: {success_count}/{len(results)}")
     print(f"[DONE] 结果: {results_file}")
     print(f"[DONE] 轨迹目录: {TRAJECTORIES_DIR}")
